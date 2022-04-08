@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import scipy
 from collections import defaultdict
@@ -25,6 +26,7 @@ class LineSearchTool(object):
         If method == 'Constant':
             c : The step size which is returned on every step.
     """
+
     def __init__(self, method='Wolfe', **kwargs):
         self._method = method
         if self._method == 'Wolfe':
@@ -71,12 +73,28 @@ class LineSearchTool(object):
         alpha : float or None if failure
             Chosen step size
         """
+        phi = lambda alpha: oracle.func_directional(x_k, d_k, alpha)
+        deriv_phi = lambda alpha: oracle.grad_directional(x_k, d_k, alpha)
+
+        def backtracking(phi, deriv_phi, c1, alpha0=1):
+            alpha = alpha0
+            while phi(alpha) > phi(0) + c1 * alpha * deriv_phi(0):
+                alpha /= 2
+            return alpha
+
         if self._method == 'Constant':
             return self.c
         elif self._method == 'Armijo':
             # your code here
+            alpha = previous_alpha or self.alpha_0
+            return backtracking(phi, deriv_phi, self.c1, alpha)
         elif self._method == 'Wolfe':
             # your code here
+            alpha = scalar_search_wolfe2(phi, deriv_phi, c1=self.c1, c2=self.c2)[0]
+            if alpha:
+                return alpha
+            else:
+                return backtracking(phi, deriv_phi, self.c1)
 
 
 def get_line_search_tool(line_search_options=None):
@@ -103,6 +121,7 @@ class GradientDescent(object):
     line_search_options : dict, LineSearchTool or None
         Dictionary with line search options. See LineSearchTool class for details.
     """
+
     def __init__(self, oracle, x_0, tolerance=1e-10, line_search_options=None):
         self.oracle = oracle
         self.x_0 = x_0.copy()
@@ -110,7 +129,7 @@ class GradientDescent(object):
         self.line_search_tool = get_line_search_tool(line_search_options)
         self.hist = defaultdict(list)
         # maybe more of your code here
-    
+
     def run(self, max_iter=100):
         """
         Runs gradient descent for max_iter iterations or until stopping 
@@ -127,3 +146,25 @@ class GradientDescent(object):
             - self.hist['x_star']: np.array containing x at last iteration
         """
         # your code here
+        start_time = time.time()
+        grad_x_0 = self.oracle.grad(self.x_0)
+        grad_x_0_norm = grad_x_0.dot(grad_x_0)
+        x_k = self.x_0.copy()
+
+        for k in range(max_iter + 1):
+            self.hist["time"].append(time.time() - start_time)
+            self.hist["func"].append(self.oracle.func(x_k))
+            grad_x_k = self.oracle.grad(x_k)
+            self.hist["grad_norm"].append(np.sqrt(grad_x_k.dot(grad_x_k)))
+
+            if grad_x_k.dot(grad_x_k) <= grad_x_0_norm * self.tolerance:
+                break
+
+            alpha = self.line_search_tool.line_search(self.oracle, x_k, -grad_x_k)
+
+            if grad_x_k.size <= 2:
+                self.hist["x"].append(-alpha * grad_x_k)
+
+            x_k = x_k - alpha * grad_x_k
+
+        self.hist["x_star"] = x_k
